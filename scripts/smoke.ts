@@ -4,7 +4,7 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 
-const client=new Client({name:'local-figma-smoke',version:'0.1.1'});
+const client=new Client({name:'local-figma-smoke',version:'0.2.0'});
 const transport=new StdioClientTransport({command:process.execPath,args:[fileURLToPath(new URL('../dist/src/index.js',import.meta.url))],
   env:Object.fromEntries(Object.entries(process.env).filter((item):item is [string,string]=>typeof item[1]==='string')),stderr:'pipe'});
 const report:Record<string,unknown>={transport:'stdio',realFigma:false};

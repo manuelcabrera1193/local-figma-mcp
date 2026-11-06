@@ -53,11 +53,46 @@ local-figma-mcp setup --client codex,claude-code,claude-desktop,vscode,copilot -
 
 Los nombres similares al MCP oficial describen equivalencias funcionales de lectura. `get_design_context` devuelve datos del diseño; la IA genera el código. Las consultas paginadas y el contexto limitado indican si hay resultados adicionales o truncamiento.
 
+## Guía de implementación y componentes
+
+El contexto incluye `implementationGuidance` sin necesidad de añadir un prompt:
+
+- Usa las barras de estado y navegación nativas y respeta los insets/safe areas. No dibuja por defecto el reloj, batería o indicador de inicio de la maqueta.
+- Prioriza los componentes, tokens y convenciones del proyecto de destino. Conserva los encabezados y navegación que pertenecen a la aplicación.
+- Indica posibles capas del sistema mediante nombre y posición. Es una heurística para revisar; el árbol y la captura originales se conservan completos.
+- Las skills se ejecutan en la IA cliente. El MCP aporta datos y preferencias; no instala librerías, ejecuta skills ni inventa APIs.
+
+Puedes orientar `get_design_context`, `figma_get_design_context` y `get_metadata` con un perfil opcional:
+
+```json
+{
+  "snapshotId": "SNAPSHOT_ID",
+  "implementation": {
+    "platform": "android",
+    "framework": "Jetpack Compose",
+    "components": "library-first",
+    "componentLibrary": "androidx.compose.material3",
+    "skills": ["figma-to-compose"],
+    "systemUi": "native"
+  }
+}
+```
+
+`components` admite `project-first` (predeterminado), `library-first` (requiere `componentLibrary`) y `custom`. `systemUi: "reference"` permite una reproducción explícita de los adornos del sistema para una referencia o prototipo. La plataforma predeterminada es `auto`; la IA la determina leyendo el proyecto. Los nombres de librería, framework y skill son preferencias que el cliente debe verificar, no garantías de instalación.
+
+El perfil se aplica a cada consulta. Para reutilizarlo en un proyecto, descríbelo en sus instrucciones/AGENTS.md y pide a la IA que lo pase al MCP. El servidor no lee automáticamente carpetas del proyecto ni cambia preferencias de otros proyectos.
+
+Ejemplo de pedido: «Usa local-figma como guía para Compose, aplica mi skill figma-to-compose si está disponible y reutiliza los componentes de mi proyecto». No es necesario repetir la política de barras nativas.
+
+Consulta [el contrato y la verificación de perfiles](docs/IMPLEMENTATION-GUIDANCE.md) para integrarlo con otros frameworks y skills.
+
 ## Validación web y móvil
 
 `figma_compare_screen` recibe `snapshotId`, `nodeId` y exactamente uno de `actualPath` (ruta absoluta a PNG) o `actualPngBase64`. Puedes usar una captura de navegador, iOS, o el PNG que devuelve `android_screenshot` de `local-android-mcp`/droid. Ambos MCP son independientes; droid conserva su API.
 
 Las imágenes deben tener las mismas dimensiones. El servidor no estira ni recorta silenciosamente. La tolerancia visual inicial es 1 % de píxeles, configurable; el resultado no certifica comportamiento funcional.
+
+Cuando la UI nativa del sistema difiere de Figma, puedes pasar `referenceRegion` y `actualRegion`, cada una con `{ "x": 0, "y": 50, "width": 375, "height": 200 }` en píxeles. Las regiones pueden empezar en posiciones distintas y deben tener el mismo tamaño. El informe conserva las dimensiones originales y registra cada recorte. Un PASS por regiones solo valida esas regiones; no significa que coincida la pantalla completa. Nunca se aplica escalado automático ni se deben elegir recortes para ocultar errores de la UI de la aplicación.
 
 ## Verificación
 

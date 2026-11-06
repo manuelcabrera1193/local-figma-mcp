@@ -35,7 +35,8 @@ export function buildImplementationGuidance(root:DesignNode,input:Implementation
     const node=stack.pop()!;
     if(++inspected>150_000){systemUiCandidatesTruncated=true;break;}
     if(node.visible===false)continue;
-    const b=bounds(node);const name=(node.name??'').toLowerCase().replace(/[_-]+/g,' ');
+    const b=bounds(node);const sourceName=typeof node.name==='string'?node.name:'';
+    const name=sourceName.toLowerCase().replace(/[_-]+/g,' ');
     let role:ChromeRole|undefined;
     if(rootBounds&&b&&b.height<=96){
       const top=b.y>=rootBounds.y-1&&b.y+b.height<=rootBounds.y+Math.min(96,rootBounds.height);
@@ -46,7 +47,7 @@ export function buildImplementationGuidance(root:DesignNode,input:Implementation
       else if(top&&/\bdynamic\s+island\b|\bnotch\b|\bdisplay\s+cutout\b/u.test(name))role='display-cutout';
     }
     if(role){
-      if(systemUiCandidates.length<50)systemUiCandidates.push({nodeId:node.id,name:node.name??'',role,
+      if(systemUiCandidates.length<50)systemUiCandidates.push({nodeId:node.id,name:sourceName,role,
         action:profile.systemUi==='native'?'use-platform-ui':'reference-only-reproduction',evidence:'layer-name-and-edge-position'});
       else systemUiCandidatesTruncated=true;
       continue;

@@ -28,7 +28,7 @@ async function main():Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
   if (command==='--help'||command==='help'||command==='-h') {process.stdout.write(HELP);return;}
-  if (command==='--version') {process.stdout.write('0.1.1\n');return;}
+  if (command==='--version') {process.stdout.write('0.2.0\n');return;}
   const root = dataRoot();
   if (!command||command==='serve') {
     if(args.length>1) throw new Error('Invalid serve arguments');
@@ -47,7 +47,7 @@ async function main():Promise<void> {
     if(command==='status'){output(await auth.status());return;}
     if(command==='doctor'){
       const repository=new FigmaRepository({root,getAccessToken:()=>auth.getAccessToken(),getAuthHeaders:()=>auth.getRequestHeaders()});
-      output({version:'0.1.1',node:process.versions.node,reaRequired:false,auth:await auth.status(),dataRoot:root,
+      output({version:'0.2.0',node:process.versions.node,reaRequired:false,auth:await auth.status(),dataRoot:root,
         snapshots:(await repository.listSnapshots()).map(s=>({id:s.id,name:s.name,status:s.status,screens:s.screens.length}))});return;
     }
     if(command==='logout'){await auth.disconnect();output({disconnected:true,cachedSnapshotsRetained:true});return;}
