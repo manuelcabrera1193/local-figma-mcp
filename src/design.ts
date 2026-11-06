@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, writeFile, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
+import {buildImplementationGuidance, type ImplementationProfileInput} from './implementation.js';
 
 export interface DesignNode {
   id: string;
@@ -284,7 +285,7 @@ export class FigmaRepository {
     if (!asset) throw new Error('Screenshot unavailable; import with screen exports enabled or refresh the reference');
     return asset;
   }
-  async getContext(snapshotId: string, nodeId?: string, depth = 3, limit = 200): Promise<{node:DesignNode;truncated:boolean;nodeCount:number;warnings:string[]}> {
+  async getContext(snapshotId: string, nodeId?: string, depth = 3, limit = 200, implementation:ImplementationProfileInput = {}) {
     if (!Number.isInteger(depth) || depth < 0 || depth > 30 || !Number.isInteger(limit) || limit < 1 || limit > 5000) throw new Error('Context depth or node limit out of bounds');
     const snapshot=await this.load(snapshotId);
     const chosen=nodeId ?? snapshot.nodeId ?? snapshot.document.id;
@@ -302,7 +303,7 @@ export class FigmaRepository {
       return result;
     };
     const node=clone(selected,depth);
-    return {node,truncated,nodeCount:count,warnings:snapshot.warnings};
+    return {node,truncated,nodeCount:count,warnings:snapshot.warnings,implementationGuidance:buildImplementationGuidance(selected,implementation)};
   }
   async getFlows(snapshotId:string):Promise<{flows:Array<Record<string,unknown>>;interactions:Array<{nodeId:string;name:string;reactions:unknown[]}>;warnings:string[]}> {
     const snapshot=await this.load(snapshotId);const flows:Array<Record<string,unknown>>=[];const interactions:Array<{nodeId:string;name:string;reactions:unknown[]}>=[];
