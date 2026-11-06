@@ -1,0 +1,147 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { chromium } from 'playwright';
+import { AuthManager } from '../src/auth.js';
+
+// This regression uses only a temporary profile, fake PAT and temporary data root.
+test('Chromium submits the actual personal-token form with an exact local Origin', async t => {
+  const names = ['FIGMA_TOKEN', 'FIGMA_TOKEN_FILE', 'FIGMA_CLIENT_ID', 'FIGMA_CLIENT_SECRET', 'FIGMA_REDIRECT_URI'] as const;
+  const saved = new Map(names.map(name => [name, process.env[name]]));
+  for (const name of names) delete process.env[name];
+  t.after(() => { for (const [name, value] of saved) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } });
+  const root = await mkdtemp(join(tmpdir(), 'figma-auth-browser-'));
+  const manager = new AuthManager({ root, port: 0, openBrowser: async () => {} });
+  t.after(() => manager.close());
+  const connection = await manager.connect({ openBrowser: false });
+  const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ?? (existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome') ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : undefined);
+  const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  let formOrigin: string | undefined;
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/personal-token') formOrigin = request.headers()['origin'];
+  });
+  await page.goto(connection.setupUrl!);
+  await page.locator('input[name="personalToken"]').fill('figd_fake-browser-regression');
+  await Promise.all([
+    page.waitForURL('**/personal-token'),
+    page.getByRole('button', { name: 'Guardar token localmente' }).click(),
+  ]);
+  t.diagnostic(`Form Origin: ${formOrigin ?? '(absent)'}`);
+  assert.equal(formOrigin, new URL(connection.setupUrl!).origin);
+  assert.equal((await manager.status()).authenticated, true);
+  assert.match(await page.textContent('body') ?? '', /Token personal guardado localmente/);
+  assert.doesNotMatch(await page.textContent('body') ?? '', /figd_fake-browser-regression/);
+});
+
+test('Chromium can finish OAuth setup and follow the explicit provider link under strict CSP', async t => {
+  const { createServer } = await import('node:http');
+  const names = ['FIGMA_TOKEN', 'FIGMA_TOKEN_FILE', 'FIGMA_CLIENT_ID', 'FIGMA_CLIENT_SECRET', 'FIGMA_REDIRECT_URI'] as const;
+  const saved = new Map(names.map(name => [name, process.env[name]]));
+  for (const name of names) delete process.env[name];
+  t.after(() => { for (const [name, value] of saved) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } });
+  const provider = createServer((_request, response) => { response.end('Proveedor OAuth de prueba'); });
+  await new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve));
+  t.after(() => { provider.closeAllConnections(); return new Promise<void>(resolve => provider.close(() => resolve())); });
+  const address = provider.address();
+  assert.ok(address && typeof address !== 'string');
+  const providerOrigin = `http://127.0.0.1:${address.port}`;
+  const root = await mkdtemp(join(tmpdir(), 'figma-oauth-browser-'));
+  const manager = new AuthManager({ root, port: 0, openBrowser: async () => {}, authorizeUrl: `${providerOrigin}/authorize` });
+  t.after(() => manager.close());
+  const connection = await manager.connect({ openBrowser: false });
+  const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ?? (existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome') ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : undefined);
+  const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  let cspBlocked = false;
+  page.on('console', message => { if (message.type() === 'error' && message.text().includes('form-action')) cspBlocked = true; });
+  await page.goto(connection.setupUrl!);
+  await page.locator('summary').click();
+  await page.locator('input[name="clientId"]').fill('fake-browser-client');
+  await page.locator('input[name="clientSecret"]').fill('fake-browser-secret');
+  await page.getByRole('button', { name: 'Guardar localmente y autorizar en Figma' }).click({ noWaitAfter: true, timeout: 3000 });
+  await page.waitForTimeout(100);
+  t.diagnostic(`External form navigation blocked by CSP: ${cspBlocked}`);
+  const providerLink = page.getByRole('link', { name: 'Autorizar en Figma', exact: true });
+  await providerLink.waitFor({ timeout: 2000 });
+  assert.equal(new URL((await providerLink.getAttribute('href'))!).origin, providerOrigin);
+  assert.doesNotMatch(await page.textContent('body') ?? '', /fake-browser-secret/);
+  await Promise.all([page.waitForURL(`${providerOrigin}/authorize?**`), providerLink.click()]);
+  assert.match(await page.textContent('body') ?? '', /Proveedor OAuth de prueba/);
+  assert.equal(cspBlocked, false);
+  assert.equal((await manager.status()).pending, true);
+});
+
+test('setup UI has accessible token reveal, responsive local assets and keyboard focus', async t => {
+  const names = ['FIGMA_TOKEN', 'FIGMA_TOKEN_FILE', 'FIGMA_CLIENT_ID', 'FIGMA_CLIENT_SECRET', 'FIGMA_REDIRECT_URI'] as const;
+  const saved = new Map(names.map(name => [name, process.env[name]]));
+  for (const name of names) delete process.env[name];
+  t.after(() => { for (const [name, value] of saved) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } });
+  const root = await mkdtemp(join(tmpdir(), 'figma-auth-ui-'));
+  const manager = new AuthManager({ root, port: 0, openBrowser: async () => {} });
+  t.after(() => manager.close());
+  const connection = await manager.connect({ openBrowser: false });
+  const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ?? (existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome') ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : undefined);
+  const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
+  const externalRequests: string[] = [];
+  const cspErrors: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).origin !== new URL(connection.setupUrl!).origin) externalRequests.push(new URL(request.url()).origin); });
+  page.on('console', message => { if (message.type() === 'error' && /content security|content-security|violates|refused/i.test(message.text())) cspErrors.push('CSP violation'); });
+  const response = await page.goto(connection.setupUrl!);
+  assert.match(response!.headers()['content-security-policy']!, /style-src 'self'/);
+  assert.match(response!.headers()['content-security-policy']!, /script-src 'self'/);
+  assert.doesNotMatch(response!.headers()['content-security-policy']!, /unsafe-inline|unsafe-eval/);
+  const input = page.getByLabel('Token personal de Figma', { exact: true });
+  const toggle = page.getByRole('button', { name: 'Mostrar token', exact: true });
+  assert.equal(await input.getAttribute('type'), 'password');
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+  await input.focus(); await page.keyboard.press('Tab');
+  assert.equal(await toggle.evaluate(element => element === document.activeElement), true);
+  assert.notEqual(await toggle.evaluate(element => getComputedStyle(element).outlineStyle), 'none');
+  await page.keyboard.press('Enter');
+  assert.equal(await input.getAttribute('type'), 'text');
+  const hide = page.getByRole('button', { name: 'Ocultar token', exact: true });
+  assert.equal(await hide.getAttribute('aria-pressed'), 'true');
+  await hide.click();
+  assert.equal(await input.getAttribute('type'), 'password');
+  assert.equal(await page.locator('details').getAttribute('open'), null);
+  const primary = page.getByRole('button', { name: 'Guardar token localmente' });
+  assert.ok((await primary.boundingBox())!.height >= 44);
+  await page.setViewportSize({ width: 375, height: 812 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  await page.locator('summary').click();
+  assert.equal(await page.locator('input[name="clientId"]').isVisible(), true);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  assert.deepEqual(externalRequests, []);
+  assert.deepEqual(cspErrors, []);
+});
+
+test('the styled token form works without JavaScript and does not echo the submitted secret', async t => {
+  const names = ['FIGMA_TOKEN', 'FIGMA_TOKEN_FILE', 'FIGMA_CLIENT_ID', 'FIGMA_CLIENT_SECRET', 'FIGMA_REDIRECT_URI'] as const;
+  const saved = new Map(names.map(name => [name, process.env[name]]));
+  for (const name of names) delete process.env[name];
+  t.after(() => { for (const [name, value] of saved) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } });
+  const root = await mkdtemp(join(tmpdir(), 'figma-auth-nojs-'));
+  const manager = new AuthManager({ root, port: 0, openBrowser: async () => {} });
+  t.after(() => manager.close());
+  const connection = await manager.connect({ openBrowser: false });
+  const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ?? (existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome') ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : undefined);
+  const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ javaScriptEnabled: false, viewport: { width: 375, height: 812 } });
+  page.setDefaultTimeout(3000);
+  await page.goto(connection.setupUrl!);
+  await page.locator('input[name="personalToken"]').fill('figd_fake-nojs-regression');
+  await Promise.all([page.waitForURL('**/personal-token'), page.getByRole('button', { name: 'Guardar token localmente' }).click()]);
+  assert.equal((await manager.status()).authenticated, true);
+  assert.match(await page.textContent('main') ?? '', /Token personal guardado localmente/);
+  assert.doesNotMatch(await page.content(), /figd_fake-nojs-regression/);
+  assert.equal(await page.locator('link[rel="stylesheet"]').count(), 1);
+});
