@@ -38,7 +38,7 @@ test('MCP import, offline context, screenshot and comparison work through actual
   const repository=new FigmaRepository({root,getAccessToken:async()=>{if(offline)throw Error('Must not read token offline');return 'fixture-only';},fetch:async(input)=>{
     if(offline)throw Error('Must not fetch offline');calls++;
     const url=new URL(String(input));
-    if(url.pathname==='/v1/files/ABC123')return Response.json({name:'Fixture',version:'1',document:{id:'0:0',type:'DOCUMENT',children:[{id:'1:2',type:'FRAME',name:'Screen',absoluteBoundingBox:{x:0,y:0,width:2,height:2},children:[{id:'1:3',type:'TEXT',characters:'Hello'}]}]},styles:{s:{name:'Body',styleType:'TEXT'}},components:{}});
+    if(url.pathname==='/v1/files/ABC123')return Response.json({name:'Fixture',version:'1',document:{id:'0:0',type:'DOCUMENT',children:[{id:'1:2',type:'FRAME',name:'Screen',absoluteBoundingBox:{x:0,y:0,width:2,height:2},children:[{id:'1:3',type:'TEXT',characters:'Hello'},{id:'1:4',type:'FRAME',name:'Header',children:[{id:'1:5',type:'INSTANCE',name:'_status-bars',absoluteBoundingBox:{x:0,y:0,width:2,height:1}}]}]}]},styles:{s:{name:'Body',styleType:'TEXT'}},components:{}});
     if(url.pathname==='/v1/images/ABC123')return Response.json({images:{'1:2':'https://figma.com/fixture.png'}});
     if(url.pathname==='/fixture.png')return new Response(new Uint8Array(bytes),{headers:{'content-type':'image/png'}});
     throw Error('Unexpected fixture request');
@@ -59,6 +59,15 @@ test('MCP import, offline context, screenshot and comparison work through actual
     const snapshotId=finished.result.snapshotId;assert.equal(calls,3);offline=true;
     const context=(await call('get_design_context',{snapshotId,depth:10})).data;
     assert.equal(context.context.node.children[0].characters,'Hello');
+    const shallow=(await call('get_design_context',{snapshotId,depth:0})).data;
+    assert.equal(shallow.context.implementationGuidance.profile.systemUi,'native');
+    assert.equal(shallow.context.implementationGuidance.systemUiCandidates[0].nodeId,'1:5');
+    assert.equal(shallow.context.truncated,true);
+    const configured=(await call('figma_get_design_context',{snapshotId,implementation:{platform:'android',framework:'Jetpack Compose',components:'library-first',componentLibrary:'Material3',skills:['figma-to-compose']}})).data;
+    assert.equal(configured.context.implementationGuidance.profile.componentLibrary,'Material3');
+    assert.deepEqual(configured.context.implementationGuidance.profile.skills,['figma-to-compose']);
+    const invalid=await client.callTool({name:'get_design_context',arguments:{snapshotId,implementation:{components:'library-first'}}});
+    assert.equal(invalid.isError,true);
     assert.equal((await call('get_metadata',{snapshotId})).data.context.node.id,'1:2');
     assert.equal((await call('get_variable_defs',{snapshotId})).data.styles.s.name,'Body');
     assert.equal((await call('figma_list_screens',{snapshotId})).data.total,1);
@@ -69,6 +78,8 @@ test('MCP import, offline context, screenshot and comparison work through actual
     assert.ok((await call('figma_list_flows',{snapshotId})).data.warnings.length);
     const comparison=(await call('figma_compare_screen',{snapshotId,nodeId:'1:2',actualPngBase64:bytes.toString('base64')})).data;
     assert.equal(comparison.status,'pass');assert.equal(comparison.diffPixels,0);
+    const cropped=(await call('figma_compare_screen',{snapshotId,nodeId:'1:2',actualPngBase64:bytes.toString('base64'),referenceRegion:{x:0,y:0,width:1,height:2},actualRegion:{x:0,y:0,width:1,height:2}})).data;
+    assert.deepEqual(cropped.comparedDimensions,{width:1,height:2});
     assert.equal(calls,3);
   }finally{await client.close();await app.close();await rm(root,{recursive:true,force:true});}
 });
